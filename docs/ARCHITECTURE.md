@@ -8,23 +8,34 @@ flowchart LR
         SIM[Simulator\nNode.js]
         PG[(PostgreSQL 15)]
         BE[Backend\nExpress + Node.js\n:3001]
+        FE[Frontend\nnginx\n:3000]
+        CADDY[Caddy\n:80 / :443]
     end
 
-    subgraph Netlify["Netlify CDN"]
-        FE[Frontend\nReact + Vite]
+    subgraph Netlify["Netlify CDN (optional)"]
+        NFE[Frontend\nReact + Vite]
     end
 
     SIM -- INSERT every 1s --> PG
     PG -- pg_notify via trigger --> BE
     BE -- SSE fan-out --> FE
-    FE -- "EventSource /api/stream\n(direct HTTPS)" --> BE
-    FE -- "REST /api/readings\n(direct HTTPS)" --> BE
+    FE -- "/api proxy (internal)" --> BE
+    CADDY -- "reverse proxy\n(domain → backend)" --> BE
+    NFE -- "EventSource /api/stream\n(direct HTTPS via Caddy)" --> BE
+    NFE -- "REST /api/readings\n(direct HTTPS via Caddy)" --> BE
 ```
+
+**Two deployment modes:**
+
+| Mode         | Frontend              | Backend access              |
+|--------------|-----------------------|-----------------------------|
+| Local Docker | nginx at `:3000`      | nginx proxies `/api/` internally |
+| VPS + Netlify | Netlify CDN          | Caddy HTTPS at `$DOMAIN`    |
 
 ## Sequence: Speed Update
 
 ```
-Simulator       PostgreSQL        Backend           Browser (Netlify)
+Simulator       PostgreSQL        Backend           Browser
     |                |                |                 |
     |-- INSERT ----→ |                |                 |
     |                |-- NOTIFY ----→ |                 |
@@ -50,10 +61,11 @@ DOM-based SVG gauges with many animated elements can drop frames. A single `<can
 ### Why Recharts for the chart?
 Recharts is React-native (no d3 import overhead) and handles the rolling window of 60 readings with `isAnimationActive={false}` for performance — we animate the gauge, not the chart.
 
-### Why is the frontend separate from Docker?
-The frontend is a static build (HTML + JS + CSS) with no server-side logic. Serving it from Netlify's CDN provides global edge caching and automatic deploys on every push, with zero infrastructure overhead. The Docker stack only needs to run stateful compute (Postgres + Node.js).
+### Why nginx for the frontend container?
+The frontend is a static build (HTML + JS + CSS) with no server-side logic. nginx:alpine serves it in < 25 MB and handles three things in one config: SPA fallback (`try_files`), `/api/` reverse proxy to the backend (no CORS needed inside the Docker network), and the critical `proxy_buffering off` directive for the SSE stream route.
 
-The one constraint is that SSE cannot be routed through Netlify (10 s serverless function timeout). The browser therefore connects directly to the backend over HTTPS, requiring a public backend URL and the correct `CORS_ORIGIN` env var set on the backend.
+### Why Caddy for HTTPS on VPS?
+Caddy auto-provisions TLS certificates via ACME/Let's Encrypt with zero manual configuration — a single `Caddyfile` pointing `{$DOMAIN}` at `backend:3001` is all that is needed. HTTP-to-HTTPS redirect is built in. This eliminates the certbot renewal cron job required with nginx + Let's Encrypt and reduces operational surface area on self-hosted deployments.
 
 ### Why layered architecture instead of MVC?
 MVC assumes a view layer rendered by the server. This backend is a pure API (no views), so the pattern used is **Layered Architecture with the Repository pattern**:
@@ -76,6 +88,28 @@ This makes each layer independently testable and prevents SQL from leaking into 
 
 ## Deployment Topology
 
+### Local Docker (all-in-one)
+
+```
+┌──────────────────────────────────────────┐
+│  docker-compose up                        │
+│                                           │
+│  ┌──────────┐   ┌──────────────────────┐  │
+│  │ postgres │   │      backend         │  │
+│  │ internal │   │     internal:3001    │  │
+│  └──────────┘   └──────────────────────┘  │
+│  ┌──────────┐   ┌──────────────────────┐  │
+│  │simulator │   │  frontend (nginx)    │  │
+│  │ internal │   │       :3000          │◄─┼── http://localhost:3000
+│  └──────────┘   └──────────────────────┘  │
+│  ┌──────────┐                             │
+│  │  Caddy   │  :80/:443 (VPS only)        │
+│  └──────────┘                             │
+└──────────────────────────────────────────┘
+```
+
+### VPS + Netlify (production)
+
 ```
 ┌─────────────────────────────────────┐
 │         VPS / Cloud Host            │
@@ -83,17 +117,20 @@ This makes each layer independently testable and prevents SQL from leaking into 
 │                                     │
 │  ┌──────────┐  ┌──────────────────┐ │
 │  │ postgres │  │     backend      │ │
-│  │  :5432   │  │      :3001       │◀┼── HTTPS (public, behind reverse proxy)
+│  │ internal │  │  internal:3001   │ │
 │  └──────────┘  └──────────────────┘ │
 │  ┌──────────┐                       │
 │  │simulator │                       │
 │  └──────────┘                       │
+│  ┌──────────┐                       │
+│  │  Caddy   │◄── HTTPS :80/:443     │
+│  └──────────┘  ($DOMAIN → backend) │
 └─────────────────────────────────────┘
 
 ┌─────────────────────────────────────┐
 │           Netlify CDN               │
 │  npm run build (Vite)               │
 │  Static files + SPA fallback        │
-│  VITE_API_URL → backend :3001       │
+│  VITE_API_URL → https://$DOMAIN     │
 └─────────────────────────────────────┘
 ```

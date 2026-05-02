@@ -27,32 +27,30 @@ A real-time speedometer web app powered by PostgreSQL LISTEN/NOTIFY and Server-S
 | Frontend  | React 18 + Vite + TypeScript                  |
 | Styling   | Tailwind CSS 3                                |
 | Charting  | Recharts                                      |
-| CI/CD     | Docker Compose (backend) + Netlify (frontend) |
+| Serving   | nginx:alpine (SPA + /api proxy, local Docker) |
+| HTTPS     | Caddy 2 (reverse proxy, auto TLS, VPS)        |
+| CI/CD     | Docker Compose (full stack) + Netlify (frontend CDN option) |
 
 ---
 
 ## Quick start — full stack with Docker
 
-This runs **postgres + backend + simulator**. The frontend is served locally via Vite.
+This runs **all five services**: postgres, backend, simulator, frontend (nginx), and Caddy.
 
 ```bash
 # 1. Clone and enter the project
 cd speedometer
 
 # 2. Create your env file
-cp .env.example .env          # edit passwords / CORS_ORIGIN if needed
+cp .env.example .env          # edit passwords / DOMAIN / CORS_ORIGIN if needed
 
-# 3. Start the backend stack
+# 3. Start the full stack
 docker-compose up --build
-
-# 4. In a separate terminal — start the frontend dev server
-cd frontend
-cp .env.example .env          # VITE_API_URL=http://localhost:3001
-npm install
-npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173).
+Open [http://localhost:3000](http://localhost:3000).
+
+> **Note:** The backend port (3001) is intentionally not exposed externally in docker-compose — Caddy and nginx proxy to it internally. To expose it directly for local debugging, uncomment the `ports` block in the `backend` service.
 
 ---
 
@@ -72,6 +70,15 @@ Run the simulator in a second terminal:
 ```bash
 cd backend
 npx ts-node-dev --respawn src/simulator.ts
+```
+
+Run the frontend dev server in a third terminal:
+
+```bash
+cd frontend
+cp .env.example .env          # VITE_API_URL=http://localhost:3001
+npm install
+npm run dev                   # Vite dev server on http://localhost:5173
 ```
 
 ---
@@ -95,7 +102,7 @@ The `netlify.toml` in `frontend/` configures the build automatically.
    |---------------|-------------------------------------|
    | `CORS_ORIGIN` | `https://your-site.netlify.app`     |
 
-> **SSE note:** Netlify serverless rewrites have a 10 s timeout — they cannot relay SSE streams. The frontend connects directly to the backend URL via `VITE_API_URL`. Make sure the backend port (3001 by default) is publicly reachable with HTTPS (use a reverse proxy such as Caddy or nginx + Let's Encrypt).
+> **SSE note:** Netlify serverless rewrites have a 10 s timeout — they cannot relay SSE streams. The frontend connects directly to the backend URL via `VITE_API_URL`. Make sure the backend port (3001 by default) is publicly reachable with HTTPS (Caddy handles this automatically if `DOMAIN` is set in `.env`).
 
 ---
 
@@ -103,42 +110,45 @@ The `netlify.toml` in `frontend/` configures the build automatically.
 
 ### Root `.env` (docker-compose)
 
-| Variable                | Default       | Description                                       |
-|-------------------------|---------------|---------------------------------------------------|
-| `POSTGRES_USER`         | `speeduser`   | PostgreSQL username                               |
-| `POSTGRES_PASSWORD`     | `speedpass`   | PostgreSQL password                               |
-| `POSTGRES_DB`           | `speedometer` | PostgreSQL database name                          |
-| `NODE_ENV`              | `production`  | Node environment                                  |
-| `PORT`                  | `3001`        | Backend HTTP port                                 |
-| `DB_HOST`               | `postgres`    | DB hostname (docker service name)                 |
-| `DB_PORT`               | `5432`        | DB port                                           |
-| `DB_USER`               | `speeduser`   | DB user (must match `POSTGRES_USER`)              |
-| `DB_PASSWORD`           | `speedpass`   | DB password                                       |
-| `DB_NAME`               | `speedometer` | DB name                                           |
-| `HISTORY_ON_CONNECT`    | `10`          | Readings sent to a new SSE client on connect      |
-| `HEARTBEAT_INTERVAL_MS` | `30000`       | SSE keep-alive interval (ms)                      |
-| `SENSOR_INTERVAL_MS`    | `1000`        | Simulator insert interval (ms)                    |
-| `PRUNE_KEEP_ROWS`       | `10000`       | Max rows kept after pruning                       |
-| `CORS_ORIGIN`           | `*`           | Allowed CORS origin (set to Netlify URL in prod)  |
-| `SENSOR_ID`             | `sensor-1`    | Sensor identifier written to each row             |
+| Variable                | Default                  | Description                                       |
+|-------------------------|--------------------------|---------------------------------------------------|
+| `POSTGRES_USER`         | `speeduser`              | PostgreSQL username                               |
+| `POSTGRES_PASSWORD`     | `speedpass`              | PostgreSQL password                               |
+| `POSTGRES_DB`           | `speedometer`            | PostgreSQL database name                          |
+| `NODE_ENV`              | `production`             | Node environment                                  |
+| `PORT`                  | `3001`                   | Backend HTTP port                                 |
+| `DB_HOST`               | `postgres`               | DB hostname (docker service name)                 |
+| `DB_PORT`               | `5432`                   | DB port                                           |
+| `DB_USER`               | `speeduser`              | DB user (must match `POSTGRES_USER`)              |
+| `DB_PASSWORD`           | `speedpass`              | DB password                                       |
+| `DB_NAME`               | `speedometer`            | DB name                                           |
+| `HISTORY_ON_CONNECT`    | `10`                     | Readings sent to a new SSE client on connect      |
+| `HEARTBEAT_INTERVAL_MS` | `30000`                  | SSE keep-alive interval (ms)                      |
+| `SENSOR_INTERVAL_MS`    | `1000`                   | Simulator insert interval (ms)                    |
+| `PRUNE_KEEP_ROWS`       | `10000`                  | Max rows kept after pruning                       |
+| `CORS_ORIGIN`           | `*`                      | Allowed CORS origin (set to Netlify URL in prod)  |
+| `SENSOR_ID`             | `sensor-1`               | Sensor identifier written to each row             |
+| `DOMAIN`                | `yourname.duckdns.org`   | Domain used by Caddy to provision a TLS cert      |
 
-### Frontend `.env` (Vite)
+### Frontend `.env` (Vite dev server only)
 
 | Variable        | Default                 | Description                                          |
 |-----------------|-------------------------|------------------------------------------------------|
-| `VITE_API_URL`  | `http://localhost:3001` | Backend base URL used by Vite proxy and EventSource  |
+| `VITE_API_URL`  | `http://localhost:3001` | Backend base URL (leave empty in Docker; nginx proxies `/api/`) |
 
 ---
 
 ## Services (Docker)
 
-| Service     | Port  | Description                      |
-|-------------|-------|----------------------------------|
-| `backend`   | 3001  | Express API + SSE endpoint       |
-| `simulator` | —     | Inserts speed readings every 1 s |
-| `postgres`  | 5432  | Database (internal, not exposed) |
+| Service     | Port     | Description                                            |
+|-------------|----------|--------------------------------------------------------|
+| `postgres`  | —        | Database (internal only)                               |
+| `backend`   | —        | Express API + SSE endpoint (internal only)             |
+| `simulator` | —        | Inserts speed readings every 1 s                       |
+| `frontend`  | 3000     | nginx: serves SPA + proxies `/api/` to backend         |
+| `caddy`     | 80 / 443 | HTTPS reverse proxy for the backend (VPS deployments)  |
 
-The frontend is **not** in docker-compose — run it with `npm run dev` locally or deploy to Netlify.
+The backend port is not exposed externally — both nginx (frontend container) and Caddy route to it inside the Docker network.
 
 ---
 
@@ -160,6 +170,12 @@ constants.ts   → single source for all env-backed defaults
 ```bash
 # Backend (Jest)
 cd backend && npm test
+
+# Backend — unit only
+cd backend && npm run test:unit
+
+# Backend — integration only
+cd backend && npm run test:integration
 
 # Frontend (Vitest)
 cd frontend && npm test
