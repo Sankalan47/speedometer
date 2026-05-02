@@ -1,8 +1,8 @@
 version: '3.8'
 
-# Frontend is deployed separately on Netlify.
-# This compose file starts postgres + backend + simulator + Caddy (HTTPS).
+# This compose file starts postgres + backend + simulator + frontend (nginx) + Caddy (HTTPS).
 # Copy .env.example → .env and fill in secrets before running.
+# For local usage: docker-compose up --build → open http://localhost:3000
 
 services:
   postgres:
@@ -42,6 +42,18 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Empty string → nginx proxies /api/ to backend; no CORS needed locally
+        VITE_API_URL: ""
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
 
   caddy:
     image: caddy:2-alpine
