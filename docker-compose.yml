@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 # This compose file starts postgres + backend + simulator + frontend (nginx) + Caddy (HTTPS).
 # Copy .env.example → .env and fill in secrets before running.
@@ -22,6 +22,7 @@ services:
       retries: 10
 
   backend:
+    image: unbox-speedometer-backend:v1.0.0
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -35,6 +36,7 @@ services:
         condition: service_healthy
 
   simulator:
+    image: unbox-speedometer-simulator:v1.0.0
     build:
       context: ./backend
       dockerfile: Dockerfile.simulator
@@ -44,6 +46,7 @@ services:
         condition: service_healthy
 
   frontend:
+    image: unbox-speedometer-frontend:v1.0.0
     build:
       context: ./frontend
       dockerfile: Dockerfile
