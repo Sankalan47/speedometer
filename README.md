@@ -1,4 +1,5 @@
 # Speedometer
+<img width="1710" height="950" alt="Screenshot 2026-05-02 at 11 54 42 PM" src="https://github.com/user-attachments/assets/e22f0064-9dc6-44ff-bea4-df5b83865f99" />
 
 A real-time speedometer web app powered by PostgreSQL LISTEN/NOTIFY and Server-Sent Events.  
 **No polling anywhere** — every speed update travels from database INSERT to browser canvas in under 10 ms.
