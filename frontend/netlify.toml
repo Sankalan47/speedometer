@@ -1,0 +1,24 @@
+[build]
+  base    = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SSE note: /api/stream requires a persistent long-lived connection.
+# Netlify serverless rewrites have a 10 s timeout and cannot relay SSE.
+# The frontend therefore talks directly to the backend via VITE_API_URL.
+#
+# Set VITE_API_URL in:
+#   Netlify → Site configuration → Environment variables
+# Example: VITE_API_URL = https://your-backend.example.com
+#
+# Also set CORS_ORIGIN on the backend to your Netlify site URL so the
+# browser's CORS preflight is allowed, e.g.:
+#   CORS_ORIGIN = https://my-speedometer.netlify.app
+
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
+  status = 200
